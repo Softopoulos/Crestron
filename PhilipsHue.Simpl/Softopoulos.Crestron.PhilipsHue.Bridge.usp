@@ -1,0 +1,2479 @@
+#default_volatile
+#enable_stack_checking
+#enable_trace
+#user_simplsharp_library "Softopoulos.Crestron.PhilipsHue"
+
+// I highly recommend addressing bulbs by MAC ID so if you replace (or re-add) a bulb,
+// you don't have to update the bulb ID in your program everywhere.
+// Using the MAC address will let this module resolve the bulb ID when
+// communicating to the Hue Bridge.
+
+// In other words, use the inputs/outputs that end with ByUID.
+// Or better yet, just use the companion Softopoulos.Crestron.PhilipsHue.LightBulb.usp module.
+
+
+// NOTE: All methods from SIMPL# that would normally return a 
+// Boolean will return non-zero for true and zero for false    
+
+#define_constant MaxNumberOfBridges 4
+#define_constant MaxNumberOfBulbs 50
+    
+#define_constant RefreshIntervalParts_Bridge 1
+#define_constant RefreshIntervalParts_Lights 2
+#define_constant RefreshIntervalParts_Groups 4
+#define_constant RefreshIntervalParts_Scenes 8
+
+#define_constant LightBulbColorMode_NotSupported 0 
+#define_constant LightBulbColorMode_None 1
+#define_constant LightBulbColorMode_HueSaturation 2
+#define_constant LightBulbColorMode_ColorTemperature 3
+#define_constant LightBulbColorMode_XY 4
+
+#define_constant LightBulbColorModeKey_None ""
+#define_constant LightBulbColorModeKey_HueSaturation "hs"
+#define_constant LightBulbColorModeKey_ColorTemperature "ct"
+#define_constant LightBulbColorModeKey_XY "xy"
+            
+// Error message from the last operation that was attempted
+string_output LastError;
+
+analog_input DebugLevelValue_in;
+analog_output DebugLevelValue_out;
+
+///////////////////////////////////////////////////////////////////////////////
+//
+// Module & Bridge Initialization
+//
+///////////////////////////////////////////////////////////////////////////////
+
+// After triggering DiscoverBridges, this can be used to set the IP address 
+// of the Philips Hue Bridge with one of the disovered addresses (or it
+// can be set up front if the IP address is known or entered manually by the user.
+// It is recommended that a static IP address be assigned to the Philips Hue Bridge.  
+// This module will remember the IP address once it determines there is a valid Philips Hue Bridge at that address.
+// NOTE: Set this before latching the IsEnabled input high.
+string_input IpAddress_in[50];
+
+string_output IpAddress_out;
+
+// Latch high to enable this module;  This will validate the bridge is available
+// and check if this module has previously been authenticated to speak with the bridge.
+// If all is well, the IsBridgeDiscovered, IsBridgeAvailable and IsAuthenticated inputs
+// will all be high.
+digital_input IsEnabled_latch;
+digital_output IsEnabled_out;
+digital_input ToggleIsEnabled;
+
+// High when the previously stored IpAddress_out or the IpAddress_in input is not a zero-length string.
+digital_output IsBridgeDiscovered;
+
+// High when a valid Philips Hue Bridge was available at the previously stored
+// IpAddress_out or in the IpAddress_in input.
+digital_output IsBridgeAvailable;
+
+// High when this module has been authenticated to communicate with the Philips Hue Bridge 
+// at the previously stored IpAddress_out or in the IpAddress_in input.
+digital_output IsAuthenticated;
+
+// Pulse to authenticate this module with the Philips Hue Bridge 
+// at the previously stored IpAddress_out or in the IpAddress_in input.
+// The Hue Bridge's link button must have been pressed within the past 30 seconds
+// prior to pulsing this input.  Otherwise, the bridge will return an error
+// indicating the link button was not pressed.
+digital_input Authenticate;
+                
+// Discovery not working via SIMPL# yet.  Having some UDP issues.  
+// For now manually enter the IP address using the IpAddress_in input;
+
+//digital_input DiscoverBridges;
+//analog_output DiscoveredBridgesCount;
+//string_output DiscoveredBridgeIpAddress[MaxNumberOfBridges];
+//string_output DiscoveredBridgeMacAddress[MaxNumberOfBridges];
+                
+///////////////////////////////////////////////////////////////////////////////
+//
+// Bridge Configuration
+//
+///////////////////////////////////////////////////////////////////////////////
+
+string_output BridgeName;
+           
+// Pulse to begin checking for software updates to the bridge or other Hue devices
+digital_input BridgeBeginCheckForSoftwareUpdates;   
+           
+// Result from pulsing BridgeBeginCheckForSoftwareUpdates.
+// If the result is the value Started, the output BridgeCheckForSoftwareUpdatesInProgress wil go high
+// until the check is completed.
+// (values for reference while debugging; not needed in code as we use the enum from SIMPL#)
+// 		Failed=0
+// 		CheckOrUpdateAlreadyInProgress=1
+// 		OldBridgeMustUseOfficialHueApp=2
+// 		NotConnectedToHuePortal=3
+// 		BridgeIsBusyAndCannotCheckForUpdates=4
+// 		Started=5
+//		UpdateAlreadyDownloading=6
+//		UpdateAlreadyAvailable=7
+analog_output BridgeBeginCheckForSoftwareUpdatesResult;
+               
+// High while the bridge is checking for software updates 
+// (as a result of pulsing the input BridgeBeginCheckForSoftwareUpdates)
+digital_output BridgeCheckForSoftwareUpdatesInProgress;
+
+// Result after pulsing BridgeBeginCheckForSoftwareUpdates and waiting for BridgeCheckForSoftwareUpdatesInProgress to go Low
+// (values for reference while debugging; not needed in code as we use the enum from SIMPL#)
+// 		Failed=0,
+// 		TimedOut=1
+// 		LostConnectingToHuePortal=2,
+// 		Completed=3
+analog_output BridgeCheckForSoftwareUpdatesResult;
+
+
+digital_input BridgeBeginApplySoftwareUpdates;   
+analog_output BridgeBeginApplySoftwareUpdatesResult;
+digital_output BridgeApplySoftwareUpdatesInProgress;
+analog_output BridgeApplySoftwareUpdatesResult;
+                                   
+
+// (values for reference while debugging; not needed in code as we use the enum from SIMPL#)
+// 		NoUpdate=0
+// 		UpdateDownloading=1
+// 		UpdateAvailableToApply=2
+// 		ApplyingUpdate=3
+analog_output BridgeSoftwareUpdateState;
+
+string_output BridgeSoftwareUpdateUrl;
+string_output BridgeSoftwareUpdateText;
+
+string_output BridgeApiVersion;
+string_output BridgeSoftwareVersion;
+string_output BridgeProxyAddress;
+analog_output BridgeProxyPort;
+digital_output BridgeLinkButton;
+string_output BridgeIpAddress;
+string_output BridgeMacAddress;
+string_output BridgeNetMask;
+string_output BridgeGateway;
+digital_output BridgeDhcp;
+digital_output BridgePortalServices;
+string_output BridgePortalConnection;
+digital_output BridgePortalState_SignedOn;
+digital_output BridgePortalState_Incoming;
+digital_output BridgePortalState_Outgoing;
+string_output BridgePortalState_Communication;
+string_output BridgeUtc;
+string_output BridgeLocalTime;
+string_output BridgeTimeZone;
+analog_output BridgeZigbeeChannel;
+string_output BridgeModelId;
+string_output BridgeId;
+digital_output BridgeFactoryNew;
+string_output BridgeReplacesBridgeId;
+            
+///////////////////////////////////////////////////////////////////////////////
+//
+// Refresh information
+//
+///////////////////////////////////////////////////////////////////////////////
+
+digital_input Refresh;
+digital_input RefreshBridgeInformation;
+analog_input RefreshInterval_in;
+analog_output RefreshInterval_out;
+
+digital_input RefreshIntervalIncludesBridge_latch;
+digital_input RefreshIntervalIncludesLights_latch;
+digital_input RefreshIntervalIncludesGroups_latch;
+digital_input RefreshIntervalIncludesScenes_latch;
+                    
+///////////////////////////////////////////////////////////////////////////////
+//
+// Light Bulbs
+//
+///////////////////////////////////////////////////////////////////////////////
+                                                  
+// Time of the transition from a light's current state to the new state (in 100ms multiples)
+// (e.g. 10 = 1 second)
+// If this is 0, the Philips Hue default is used, which is 400 ms or 0.4 seconds.
+// Each light bulb can also be configured to have different transition times.
+analog_input LightBulbsDefaultTransitionTime_in;
+analog_output LightBulbsDefaultTransitionTime_out;
+
+digital_input BeginSearchForNewLightBulbs_in;
+analog_output BeginSearchForNewLightBulbsResult_out;
+digital_output SearchForNewLightBulbsInProgress;
+analog_output SearchForNewLightBulbsResult_out;
+
+digital_output FoundLightBulb;
+string_output FoundLightBulbName;
+analog_output FoundLightBulbsCount;
+string_output FoundLightBulbNames[MaxNumberOfBulbs];
+
+///////////////////////////////////////////////////////////////////////////////          
+//
+// Light Bulb Static Info
+//
+string_output LightBulbId[MaxNumberOfBulbs];                               
+string_output LightBulbUniqueId[MaxNumberOfBulbs];
+string_output LightBulbType[MaxNumberOfBulbs];
+analog_output LightBulbCapabilitiesMask[MaxNumberOfBulbs];
+string_output LightBulbModelId[MaxNumberOfBulbs];
+string_output LightBulbSwVersion[MaxNumberOfBulbs];
+string_output LightBulbManufacturer[MaxNumberOfBulbs];
+digital_output LightBulbSupportsDimming[MaxNumberOfBulbs];
+digital_output LightBulbSupportsColorTemp[MaxNumberOfBulbs];
+digital_output LightBulbSupportsColor[MaxNumberOfBulbs];
+///////////////////////////////////////////////////////////////////////////////
+//
+// Light Bulb Get/Set Values (By Index)
+//
+
+// Latch this input high to update multiple light bulb properties at once.
+// Then release this input to low to commit the changes.
+// This is useful to avoid seeing the light turn on and then changing brightness/color/temperature.
+// By setting all the properties at once, the light will turn on at the desired brightness/color/temperature.
+digital_input UpdatingLightBulb_latch[MaxNumberOfBulbs];
+
+
+string_input LightBulbName_in[MaxNumberOfBulbs][32];
+string_output LightBulbName_out[MaxNumberOfBulbs];
+
+digital_output LightBulbIsOnline_out[MaxNumberOfBulbs];
+
+digital_input LightBulbToggle_in[MaxNumberOfBulbs];
+digital_input LightBulbOnOff_latch[MaxNumberOfBulbs];
+digital_input LightBulbOn_in[MaxNumberOfBulbs];
+digital_input LightBulbOff_in[MaxNumberOfBulbs];
+digital_input LightBulbInstantOn_in[MaxNumberOfBulbs];
+digital_input LightBulbInstantOff_in[MaxNumberOfBulbs];
+digital_output LightBulbOn_out[MaxNumberOfBulbs];
+
+analog_output LightBulbColorModeValue_out[MaxNumberOfBulbs];
+string_output LightBulbColorModeKey_out[MaxNumberOfBulbs];
+
+analog_input LightBulbBrightness_in[MaxNumberOfBulbs];
+analog_output LightBulbBrightness_out[MaxNumberOfBulbs];
+analog_input LightBulbBrightnessPct_in[MaxNumberOfBulbs];
+analog_output LightBulbBrightnessPct_out[MaxNumberOfBulbs];
+
+analog_input LightBulbBrightnessRaiseOffset_in[MaxNumberOfBulbs];
+digital_input LightBulbBrightnessRaise_in[MaxNumberOfBulbs];
+analog_input LightBulbBrightnessLowerOffset_in[MaxNumberOfBulbs];
+digital_input LightBulbBrightnessLower_in[MaxNumberOfBulbs];
+
+analog_input LightBulbBrightnessRaiseTime_in[MaxNumberOfBulbs];
+analog_output LightBulbBrightnessRaiseTime_out[MaxNumberOfBulbs];
+digital_input LightBulbBrightnessRaise_latch[MaxNumberOfBulbs];
+
+analog_input LightBulbBrightnessLowerTime_in[MaxNumberOfBulbs];
+analog_output LightBulbBrightnessLowerTime_out[MaxNumberOfBulbs];
+digital_input LightBulbBrightnessLower_latch[MaxNumberOfBulbs];
+
+analog_input LightBulbCycleDimTime_in[MaxNumberOfBulbs];
+analog_output LightBulbCycleDimTime_out[MaxNumberOfBulbs];
+digital_input LightBulbCycleDim_latch[MaxNumberOfBulbs];
+
+analog_input LightBulbCycleColorTempTime_in[MaxNumberOfBulbs];
+analog_output LightBulbCycleColorTempTime_out[MaxNumberOfBulbs];
+digital_input LightBulbCycleColorTemp_latch[MaxNumberOfBulbs];
+
+analog_input LightBulbCycleHueTime_in[MaxNumberOfBulbs];
+analog_output LightBulbCycleHueTime_out[MaxNumberOfBulbs];
+digital_input LightBulbCycleHue_latch[MaxNumberOfBulbs];
+
+analog_input LightBulbCycleSaturationTime_in[MaxNumberOfBulbs];
+analog_output LightBulbCycleSaturationTime_out[MaxNumberOfBulbs];
+digital_input LightBulbCycleSaturation_latch[MaxNumberOfBulbs];
+
+analog_input LightBulbColorTemp_in[MaxNumberOfBulbs];
+analog_output LightBulbColorTemp_out[MaxNumberOfBulbs];
+digital_input LightBulbColorTempWarm[MaxNumberOfBulbs];
+digital_input LightBulbColorTempDaylight[MaxNumberOfBulbs];
+
+analog_input LightBulbHue_in[MaxNumberOfBulbs];
+analog_output LightBulbHue_out[MaxNumberOfBulbs];
+
+analog_input LightBulbSaturation_in[MaxNumberOfBulbs];
+analog_output LightBulbSaturation_out[MaxNumberOfBulbs];
+analog_input LightBulbSaturationPct_in[MaxNumberOfBulbs];
+analog_output LightBulbSaturationPct_out[MaxNumberOfBulbs];
+
+string_input LightBulbColorNameOrHexRgb_in[MaxNumberOfBulbs][50];
+
+// Time of the transition from the light's current state to the new state (in 100ms multiples) 
+// (e.g. 10 = 1 second)
+// If this is 0, the input LightBulbsDefaultTransitionTime_in is used or, if that is not set either, 
+// the Philips Hue default is used, which is 400ms or 0.4 seconds.
+analog_input LightBulbTransitionTime_in[MaxNumberOfBulbs];
+analog_output LightBulbTransitionTime_out[MaxNumberOfBulbs];
+
+digital_input LightBulbColorLoop_latch[MaxNumberOfBulbs];
+digital_output LightBulbColorLoop_out[MaxNumberOfBulbs];
+
+digital_input LightBulbBlinkOnce_in[MaxNumberOfBulbs];
+digital_input LightBulbBlinkFor15Sec_latch[MaxNumberOfBulbs];
+
+digital_input RefreshLightBulb[MaxNumberOfBulbs];
+///////////////////////////////////////////////////////////////////////////////
+//
+// Light Bulb Get/Set Values by Unique ID 
+// (currently always the MAC address, but based on the name given by Philips, it may not always be that way)
+//
+  
+
+//  
+// LightBulbByUIDMapping
+//           
+// Maps a light bulb's unique ID (see string_output LightBulbUniqueId)
+// to a known index for use with inputs/outputs in this file that end with the
+// suffix "ByUID".
+// This is needed to reliably target a specific bulb, regardless of what index/ID
+// the bridge has assigned to it.  For example, if you delete a light bulb
+// and rediscover it, its index/ID will change.  So if you had a keypad (or any button)
+// programmed for a specific bulb, it will no longer work.
+// By programming using these "ByUID" inputs/outputs, you are guaranteed to
+// always be targeting the correct light bulb.
+//
+// In summary, when designing a user interface that shows all light bulbs (e.g in a list),
+// using the index based inputs/outputs is the proper way to do it.
+// When programming a table-top or wall keypad for a specific bulb in that room,
+// the "ByUID" inputs/outputs are more likely to not require future reprogramming.
+string_input LightBulbByUIDMapping[MaxNumberOfBulbs][28];
+
+digital_input UpdatingLightBulbByUID_latch[MaxNumberOfBulbs];
+
+// See the documentation for the index-based inputs/outputs above.
+// These are all the same, just using the mappings by unique ID (LightBulbByUIDMapping) instead.
+
+string_output LightBulbIdByUID[MaxNumberOfBulbs];                               
+string_output LightBulbTypeByUID[MaxNumberOfBulbs];
+analog_output LightBulbCapabilitiesMaskByUID[MaxNumberOfBulbs];
+string_output LightBulbModelIdByUID[MaxNumberOfBulbs];
+string_output LightBulbSwVersionByUID[MaxNumberOfBulbs];
+string_output LightBulbManufacturerByUID[MaxNumberOfBulbs];
+digital_output LightBulbSupportsDimmingByUID[MaxNumberOfBulbs];
+digital_output LightBulbSupportsColorTempByUID[MaxNumberOfBulbs];
+digital_output LightBulbSupportsColorByUID[MaxNumberOfBulbs];
+
+string_input LightBulbNameByUID_in[MaxNumberOfBulbs][32];
+string_output LightBulbNameByUID_out[MaxNumberOfBulbs];
+
+digital_output LightBulbIsOnlineByUID_out[MaxNumberOfBulbs];
+
+digital_input LightBulbToggleByUID_in[MaxNumberOfBulbs];
+digital_input LightBulbOnOffByUID_latch[MaxNumberOfBulbs];
+digital_input LightBulbOnByUID_in[MaxNumberOfBulbs];
+digital_input LightBulbOffByUID_in[MaxNumberOfBulbs];
+digital_input LightBulbInstantOnByUID_in[MaxNumberOfBulbs];
+digital_input LightBulbInstantOffByUID_in[MaxNumberOfBulbs];
+digital_output LightBulbOnByUID_out[MaxNumberOfBulbs];
+
+analog_output LightBulbColorModeValueByUID_out[MaxNumberOfBulbs];
+string_output LightBulbColorModeKeyByUID_out[MaxNumberOfBulbs];
+
+analog_input LightBulbBrightnessByUID_in[MaxNumberOfBulbs];
+analog_output LightBulbBrightnessByUID_out[MaxNumberOfBulbs];
+analog_input LightBulbBrightnessPctByUID_in[MaxNumberOfBulbs];
+analog_output LightBulbBrightnessPctByUID_out[MaxNumberOfBulbs];
+
+analog_input LightBulbBrightnessRaiseOffsetByUID_in[MaxNumberOfBulbs];
+digital_input LightBulbBrightnessRaiseByUID_in[MaxNumberOfBulbs];
+analog_input LightBulbBrightnessLowerOffsetByUID_in[MaxNumberOfBulbs];
+digital_input LightBulbBrightnessLowerByUID_in[MaxNumberOfBulbs];
+
+analog_input LightBulbBrightnessRaiseTimeByUID_in[MaxNumberOfBulbs];
+analog_output LightBulbBrightnessRaiseTimeByUID_out[MaxNumberOfBulbs];
+digital_input LightBulbBrightnessRaiseByUID_latch[MaxNumberOfBulbs];
+
+analog_input LightBulbBrightnessLowerTimeByUID_in[MaxNumberOfBulbs];
+analog_output LightBulbBrightnessLowerTimeByUID_out[MaxNumberOfBulbs];
+digital_input LightBulbBrightnessLowerByUID_latch[MaxNumberOfBulbs];
+
+analog_input LightBulbCycleDimTimeByUID_in[MaxNumberOfBulbs];
+analog_output LightBulbCycleDimTimeByUID_out[MaxNumberOfBulbs];
+digital_input LightBulbCycleDimByUID_latch[MaxNumberOfBulbs];
+
+analog_input LightBulbCycleColorTempTimeByUID_in[MaxNumberOfBulbs];
+analog_output LightBulbCycleColorTempTimeByUID_out[MaxNumberOfBulbs];
+digital_input LightBulbCycleColorTempByUID_latch[MaxNumberOfBulbs];
+
+analog_input LightBulbCycleHueTimeByUID_in[MaxNumberOfBulbs];
+analog_output LightBulbCycleHueTimeByUID_out[MaxNumberOfBulbs];
+digital_input LightBulbCycleHueByUID_latch[MaxNumberOfBulbs];
+
+analog_input LightBulbCycleSaturationTimeByUID_in[MaxNumberOfBulbs];
+analog_output LightBulbCycleSaturationTimeByUID_out[MaxNumberOfBulbs];
+digital_input LightBulbCycleSaturationByUID_latch[MaxNumberOfBulbs];
+
+analog_input LightBulbColorTempByUID_in[MaxNumberOfBulbs];
+analog_output LightBulbColorTempByUID_out[MaxNumberOfBulbs];
+digital_input LightBulbColorTempWarmByUID[MaxNumberOfBulbs];
+digital_input LightBulbColorTempDaylightByUID[MaxNumberOfBulbs];
+
+analog_input LightBulbHueByUID_in[MaxNumberOfBulbs];
+analog_output LightBulbHueByUID_out[MaxNumberOfBulbs];
+
+analog_input LightBulbSaturationByUID_in[MaxNumberOfBulbs];
+analog_output LightBulbSaturationByUID_out[MaxNumberOfBulbs];
+analog_input LightBulbSaturationPctByUID_in[MaxNumberOfBulbs];
+analog_output LightBulbSaturationPctByUID_out[MaxNumberOfBulbs];
+
+string_input LightBulbColorNameOrHexRgbByUID_in[MaxNumberOfBulbs][50];
+
+analog_input LightBulbTransitionTimeByUID_in[MaxNumberOfBulbs];
+analog_output LightBulbTransitionTimeByUID_out[MaxNumberOfBulbs];
+
+digital_input LightBulbColorLoopByUID_latch[MaxNumberOfBulbs];
+digital_output LightBulbColorLoopByUID_out[MaxNumberOfBulbs];
+
+digital_input LightBulbBlinkOnceByUID_in[MaxNumberOfBulbs];
+digital_input LightBulbBlinkFor15SecByUID_latch[MaxNumberOfBulbs];
+
+digital_input RefreshLightBulbByUID[MaxNumberOfBulbs];
+
+// So everything before me is expanded fully
+analog_input AnalogInputTerminator[1]; 
+analog_output AnalogOutputTerminator[1]; 
+string_input StringInputTerminator[1][1]; 
+string_output StringOutputTerminator[1];
+
+///////////////////////////////////////////////////////////////////////////////
+//
+// Variables
+//
+///////////////////////////////////////////////////////////////////////////////
+               
+nonVolatile string LastIpAddress[50];
+nonVolatile string LastUsername[50];
+
+// Hue client
+BridgeClient _client;
+
+// Stateful variable
+string _knownLightBulbUniqueId[MaxNumberOfBulbs][28];
+LightBulbProperties _lightBulbPendingPropertiesToSet;
+integer _foundLightBulbsCount;
+
+string _lightBulbName[MaxNumberOfBulbs][32];
+string _lightBulbColorModeKey[MaxNumberOfBulbs][5];
+string _lightBulbNameByUID[MaxNumberOfBulbs][32];
+string _lightBulbColorModeKeyByUID[MaxNumberOfBulbs][5];
+    
+///////////////////////////////////////////////////////////////////////////////
+//
+// Functions to update Inputs/Outputs from the Client
+//
+///////////////////////////////////////////////////////////////////////////////
+             
+function UpdateBridgeInformationFromClient()
+{
+	BridgeName = _client.BridgeConfiguration.Name;
+
+	BridgeSoftwareUpdateState = _client.BridgeConfiguration.SoftwareUpdate.UpdateState;
+	BridgeSoftwareUpdateUrl = _client.BridgeConfiguration.SoftwareUpdate.Url;
+	BridgeSoftwareUpdateText = _client.BridgeConfiguration.SoftwareUpdate.Text;
+
+	BridgeApiVersion = _client.BridgeConfiguration.ApiVersion;
+	BridgeSoftwareVersion = _client.BridgeConfiguration.SoftwareVersion;
+	BridgeProxyAddress = _client.BridgeConfiguration.ProxyAddress;
+	BridgeProxyPort = _client.BridgeConfiguration.ProxyPort;
+	BridgeLinkButton = _client.BridgeConfiguration.LinkButton;
+	BridgeIpAddress = _client.BridgeConfiguration.IpAddress;
+	BridgeMacAddress = _client.BridgeConfiguration.MacAddress;
+	BridgeNetMask = _client.BridgeConfiguration.NetMask;
+	BridgeGateway = _client.BridgeConfiguration.Gateway;
+	BridgeDhcp = _client.BridgeConfiguration.Dhcp;
+	BridgePortalServices = _client.BridgeConfiguration.PortalServices;
+	BridgePortalConnection = _client.BridgeConfiguration.PortalConnection;
+	BridgePortalState_SignedOn = _client.BridgeConfiguration.PortalState.SignedOn;
+	BridgePortalState_Incoming = _client.BridgeConfiguration.PortalState.Incoming;
+	BridgePortalState_Outgoing = _client.BridgeConfiguration.PortalState.Outgoing;
+	BridgePortalState_Communication = _client.BridgeConfiguration.PortalState.Communication;
+	BridgeUtc = _client.BridgeConfiguration.Utc;
+	BridgeLocalTime = _client.BridgeConfiguration.LocalTime;
+	BridgeTimeZone = _client.BridgeConfiguration.TimeZone;
+	BridgeZigbeeChannel = _client.BridgeConfiguration.ZigbeeChannel;
+	BridgeModelId = _client.BridgeConfiguration.ModelId;
+	BridgeId = _client.BridgeConfiguration.BridgeId;
+	BridgeFactoryNew = _client.BridgeConfiguration.FactoryNew;
+	BridgeReplacesBridgeId = _client.BridgeConfiguration.ReplacesBridgeId;
+}
+
+function ClearByUIDAtMappingIndex(integer index)
+{
+}
+
+function UpdateLightBulbStateFromLightBulbByUID(LightBulb lightBulb, integer index, integer isNewLightBulb)
+{
+	integer colorMode;
+	if (isNewLightBulb = 1)
+	{
+		LightBulbIdByUID[index] = lightBulb.Id;                               
+		LightBulbTypeByUID[index] = lightBulb.Type;
+		LightBulbCapabilitiesMaskByUID[index] = lightBulb.Capabilities;
+		LightBulbModelIdByUID[index] = lightBulb.ModelId;
+		LightBulbSwVersionByUID[index] = lightBulb.SwVersion;
+		LightBulbManufacturerByUID[index] = lightBulb.Manufacturer;
+
+		LightBulbSupportsDimmingByUID[index] = lightBulb.SupportsDimming;
+		LightBulbSupportsColorTempByUID[index] = lightBulb.SupportsColorTemperature;
+		LightBulbSupportsColorByUID[index] = lightBulb.SupportsColor;
+	}
+                                                  
+	if (_lightBulbNameByUID[index] != lightBulb.Name)
+	{
+		_lightBulbNameByUID[index] = lightBulb.Name;
+		LightBulbNameByUID_out[index] = lightBulb.Name;
+	}
+    
+	if (LightBulbIsOnlineByUID_out[index] != lightBulb.IsOnline)
+		LightBulbIsOnlineByUID_out[index] = lightBulb.IsOnline;
+    
+	if (LightBulbOnByUID_out[index] != lightBulb.On)
+		LightBulbOnByUID_out[index] = lightBulb.On;
+            
+	colorMode = lightBulb.ColorMode;
+	if (LightBulbColorModeValueByUID_out[index] != colorMode)
+		LightBulbColorModeValueByUID_out[index] = colorMode;
+                                                                  
+	if (_lightBulbColorModeKeyByUID[index] != lightBulb.ColorModeKey)
+	{
+		_lightBulbColorModeKeyByUID[index] = lightBulb.ColorModeKey;
+		LightBulbColorModeKeyByUID_out[index] = lightBulb.ColorModeKey;
+	}
+                                                              
+	if (LightBulbBrightnessByUID_out[index] != lightBulb.Brightness)
+		LightBulbBrightnessByUID_out[index] = lightBulb.Brightness;
+    
+	if (LightBulbBrightnessPctByUID_out[index] != lightBulb.BrightnessPercentage)
+		LightBulbBrightnessPctByUID_out[index] = lightBulb.BrightnessPercentage;
+
+    if (LightBulbBrightnessRaiseTimeByUID_out[index] != lightBulb.RaiseTime)
+		LightBulbBrightnessRaiseTimeByUID_out[index] = lightBulb.RaiseTime;
+
+    if (LightBulbBrightnessLowerTimeByUID_out[index] != lightBulb.LowerTime)
+		LightBulbBrightnessLowerTimeByUID_out[index] = lightBulb.LowerTime;
+
+	if (LightBulbCycleDimTimeByUID_out[index] != lightBulb.CycleDimTime)
+		LightBulbCycleDimTimeByUID_out[index] = lightBulb.CycleDimTime;
+
+	if (LightBulbCycleColorTempTimeByUID_out[index] != lightBulb.CycleColorTemperatureTime)
+		LightBulbCycleColorTempTimeByUID_out[index] = lightBulb.CycleColorTemperatureTime;
+
+	if (LightBulbCycleHueTimeByUID_out[index] != lightBulb.CycleHueTime)
+		LightBulbCycleHueTimeByUID_out[index] = lightBulb.CycleHueTime;
+
+	if (LightBulbCycleSaturationTimeByUID_out[index] != lightBulb.CycleSaturationTime)
+		LightBulbCycleSaturationTimeByUID_out[index] = lightBulb.CycleSaturationTime;
+    
+	if (LightBulbColorTempByUID_out[index] != lightBulb.ColorTemperature)
+		LightBulbColorTempByUID_out[index] = lightBulb.ColorTemperature;
+    
+	if (LightBulbHueByUID_out[index] != lightBulb.Hue)
+		LightBulbHueByUID_out[index] = lightBulb.Hue;
+    
+	if (LightBulbSaturationByUID_out[index] != lightBulb.Saturation)
+		LightBulbSaturationByUID_out[index] = lightBulb.Saturation;
+    
+	if (LightBulbSaturationPctByUID_out[index] != lightBulb.SaturationPercentage)
+		LightBulbSaturationPctByUID_out[index] = lightBulb.SaturationPercentage;
+
+	if (lightBulb.TransitionTime = -1)
+	{
+		if (LightBulbTransitionTimeByUID_out[index] != 0)
+			LightBulbTransitionTimeByUID_out[index] = 0;
+	}
+	else
+	{
+		if (LightBulbTransitionTimeByUID_out[index] != lightBulb.TransitionTime)
+			LightBulbTransitionTimeByUID_out[index] = lightBulb.TransitionTime;
+	}
+
+	if (lightBulb.Effect = LightBulbEffect.ColorLoop)
+	{
+		if (LightBulbColorLoopByUID_out[index] != on)
+			LightBulbColorLoopByUID_out[index] = on;
+	}
+	else
+	{
+		if (LightBulbColorLoopByUID_out[index] != off)
+			LightBulbColorLoopByUID_out[index] = off;
+	}
+}
+
+function UpdateLightBulbStateFromClientByUIDAtMappingIndex(string lightBulbUniqueId, integer index, integer isNewLightBulb)
+{
+	LightBulb lightBulb;
+	if (_client.TryGetLightBulbByUniqueId(lightBulbUniqueId, lightBulb) = 0)
+		return;
+                     
+	UpdateLightBulbStateFromLightBulbByUID(lightBulb, index, isNewLightBulb);
+}
+
+function UpdateLightBulbStateFromClientByUID(string lightBulbUniqueId, integer isNewLightBulb)
+{
+	integer index;
+	for (index=1 to MaxNumberOfBulbs)
+	{
+		if (LightBulbByUIDMapping[index] = lightBulbUniqueId)
+		{
+			UpdateLightBulbStateFromClientByUIDAtMappingIndex(lightBulbUniqueId, index, isNewLightBulb);
+
+			break;
+		}
+	}
+}
+
+function UpdateLightBulbStateFromClient(integer index)
+{
+	integer isNewLightBulb;
+	LightBulb lightBulb;
+	integer colorMode;
+	if (index > MaxNumberOfBulbs)
+		return;
+	if (_client.TryGetLightBulb(index - 1, lightBulb) = 0)
+		return;
+
+	if (_knownLightBulbUniqueId[index] != lightBulb.UniqueId)
+		isNewLightBulb = 1;
+	else
+		isNewLightBulb = 0;
+              
+	if (isNewLightBulb = 1)
+	{
+		_knownLightBulbUniqueId[index] = lightBulb.UniqueId;
+
+		LightBulbId[index] = lightBulb.Id;                               
+		LightBulbUniqueId[index] = lightBulb.UniqueId;
+		LightBulbType[index] = lightBulb.Type;
+		LightBulbCapabilitiesMask[index] = lightBulb.Capabilities;
+		LightBulbModelId[index] = lightBulb.ModelId;
+		LightBulbSwVersion[index] = lightBulb.SwVersion;
+		LightBulbManufacturer[index] = lightBulb.Manufacturer;
+
+		LightBulbSupportsDimming[index] = lightBulb.SupportsDimming;
+		LightBulbSupportsColorTemp[index] = lightBulb.SupportsColorTemperature;
+		LightBulbSupportsColor[index] = lightBulb.SupportsColor;
+	}
+                                              
+	if (_lightBulbName[index] != lightBulb.Name)
+	{
+		_lightBulbName[index] = lightBulb.Name;
+		LightBulbName_out[index] = lightBulb.Name;
+	}
+
+	if (LightBulbIsOnline_out[index] != lightBulb.IsOnline)
+		LightBulbIsOnline_out[index] = lightBulb.IsOnline;
+	if (LightBulbOn_out[index] != lightBulb.On)
+		LightBulbOn_out[index] = lightBulb.On;
+
+	colorMode = lightBulb.ColorMode;
+	if (LightBulbColorModeValue_out[index] != colorMode)
+		LightBulbColorModeValue_out[index] = colorMode;
+
+	if (_lightBulbColorModeKey[index] != lightBulb.ColorModeKey)
+	{
+		_lightBulbColorModeKey[index] = lightBulb.ColorModeKey;
+		LightBulbColorModeKey_out[index] = lightBulb.ColorModeKey;
+	}
+
+	if (LightBulbBrightness_out[index] != lightBulb.Brightness)
+		LightBulbBrightness_out[index] = lightBulb.Brightness;
+
+	if (LightBulbBrightnessPct_out[index] != lightBulb.BrightnessPercentage)
+		LightBulbBrightnessPct_out[index] = lightBulb.BrightnessPercentage;
+
+    if (LightBulbBrightnessRaiseTime_out[index] != lightBulb.RaiseTime)
+		LightBulbBrightnessRaiseTime_out[index] = lightBulb.RaiseTime;
+
+    if (LightBulbBrightnessLowerTime_out[index] != lightBulb.LowerTime)
+		LightBulbBrightnessLowerTime_out[index] = lightBulb.LowerTime;
+
+	if (LightBulbCycleDimTime_out[index] != lightBulb.CycleDimTime)
+		LightBulbCycleDimTime_out[index] = lightBulb.CycleDimTime;    
+
+	if (LightBulbCycleColorTempTime_out[index] != lightBulb.CycleColorTemperatureTime)
+		LightBulbCycleColorTempTime_out[index] = lightBulb.CycleColorTemperatureTime;    
+
+	if (LightBulbCycleHueTime_out[index] != lightBulb.CycleHueTime)
+		LightBulbCycleHueTime_out[index] = lightBulb.CycleHueTime;    
+
+	if (LightBulbCycleSaturationTime_out[index] != lightBulb.CycleSaturationTime)
+		LightBulbCycleSaturationTime_out[index] = lightBulb.CycleSaturationTime;    
+
+	if (LightBulbColorTemp_out[index] != lightBulb.ColorTemperature)                                       
+		LightBulbColorTemp_out[index] = lightBulb.ColorTemperature;
+
+	if (LightBulbHue_out[index] != lightBulb.Hue)
+		LightBulbHue_out[index] = lightBulb.Hue;
+
+	if (LightBulbSaturation_out[index] != lightBulb.Saturation)
+		LightBulbSaturation_out[index] = lightBulb.Saturation;
+
+	if (LightBulbSaturationPct_out[index] != lightBulb.SaturationPercentage)
+		LightBulbSaturationPct_out[index] = lightBulb.SaturationPercentage;
+
+	if (lightBulb.TransitionTime = -1)
+	{
+		if (LightBulbTransitionTime_out[index] != 0)
+			LightBulbTransitionTime_out[index] = 0;
+	}
+	else
+	{
+		if (LightBulbTransitionTime_out[index] != lightBulb.TransitionTime)
+			LightBulbTransitionTime_out[index] = lightBulb.TransitionTime;
+	}
+
+	if (lightBulb.Effect = LightBulbEffect.ColorLoop)
+	{
+		if (LightBulbColorLoop_out[index] != on)
+			LightBulbColorLoop_out[index] = on;
+	}
+	else
+	{
+		if (LightBulbColorLoop_out[index] != off)
+			LightBulbColorLoop_out[index] = off;
+	}
+
+	UpdateLightBulbStateFromClientByUID(lightBulb.UniqueId, isNewLightBulb);
+}
+
+/*
+function UpdateLightBulbStatesFromClient()
+{
+	integer index;
+	for (index=1 to _client.LightBulbCount)
+	{
+		UpdateLightBulbStateFromClient(index);
+	}
+}
+*/
+
+///////////////////////////////////////////////////////////////////////////////
+//
+// Event Handlers
+//
+///////////////////////////////////////////////////////////////////////////////
+             
+eventHandler OnErrorOccurred(BridgeClient client, ErrorOccurredEventArgs e)
+{
+	LastError = e.ErrorMessage;
+}
+
+eventHandler OnCheckForSoftwareUpdatesCompleted(BridgeClient client, CheckForSoftwareUpdatesCompletedEventArgs e)
+{
+	BridgeCheckForSoftwareUpdatesInProgress = off;
+	BridgeCheckForSoftwareUpdatesResult = e.Result;
+}
+
+eventHandler OnApplySoftwareUpdatesCompleted(BridgeClient client, ApplySoftwareUpdatesCompletedEventArgs e)
+{
+	BridgeApplySoftwareUpdatesInProgress = off;
+	BridgeApplySoftwareUpdatesResult = e.Result;
+}
+
+eventHandler OnBridgeConfigurationPropertiesChanged(BridgeClient client, EventArgs e)
+{
+	Print("Update bridge information from client\n");
+	UpdateBridgeInformationFromClient();
+	Print("Update bridge information from client: done\n");
+}
+
+eventHandler OnFoundLightBulb(BridgeClient client, FoundLightBulbEventArgs e)
+{
+	_foundLightBulbsCount = _foundLightBulbsCount + 1;
+	FoundLightBulbName = e.LightBulbName;
+	FoundLightBulbNames[_foundLightBulbsCount] = e.LightBulbName;
+	FoundLightBulbsCount = _foundLightBulbsCount;
+
+	FoundLightBulb = on;
+	FoundLightBulb = off;
+}
+
+eventHandler OnSearchForNewLightBulbsCompleted(BridgeClient client, SearchForNewLightBulbsCompletedEventArgs e)
+{
+	SearchForNewLightBulbsInProgress = off;
+	SearchForNewLightBulbsResult_out = e.Result;
+}
+
+
+ 
+eventHandler OnLightBulbPropertiesChanged(BridgeClient client, LightBulbPropertiesChangedEventArgs e)
+{
+	Print("Update light bulb %d from client\n", e.Index + 1);
+	UpdateLightBulbStateFromClient(e.Index + 1);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//
+// Initialization
+//
+///////////////////////////////////////////////////////////////////////////////
+
+change DebugLevelValue_in
+{
+	_client.DebugLevelValue = DebugLevelValue_in;
+	DebugLevelValue_out = _client.DebugLevelValue;
+}
+                   
+function Initialize()
+{
+	string ipAddressToUse[50];
+	// If we have no IP address stored, we set our state to "needing to discover the bridge"
+	if (Len(LastIpAddress) = 0 && Len(IpAddress_in) = 0)
+	{
+		Print("No bridge IP address\n");
+		IsBridgeDiscovered = off;
+	}
+	else
+	{
+		if (Len(IpAddress_in) > 0)
+			ipAddressToUse = IpAddress_in;
+		else
+			ipAddressToUse = LastIpAddress;
+		Print("Check bridge at IP address %s\n", ipAddressToUse);
+
+		IsBridgeDiscovered = on;
+
+		// Check if the bridge is available
+		if (_client.CheckBridgeAvailability(ipAddressToUse) != 0)
+		{
+			IsBridgeAvailable = on;			
+            IpAddress_out = ipAddressToUse;
+			LastIpAddress = ipAddressToUse;
+
+			// Now check if we are authenticated to speak to the bridge
+			if (Len(LastUsername) > 0)
+            {
+				_client.Initialize(ipAddressToUse, LastUsername);
+                IsEnabled_out = on;
+       
+				if (_client.IsAuthenticated)
+				{
+					IsAuthenticated = on;
+					//UpdateLightBulbStatesFromClient();
+				}
+			}
+		}
+		else
+		{
+			Print("Bridge is not available or offline\n");
+		}
+	}
+}
+
+function Uninitialize()
+{
+	integer index;
+
+	_client.Uninitialize();
+
+	for (index=1 to _client.LightBulbCount)
+	{
+		_knownLightBulbUniqueId[index] = "";
+		_lightBulbName[index] = "";
+		_lightBulbColorModeKey[index] = "";
+	}
+
+	for (index=1 to MaxNumberOfBulbs)
+	{
+		_lightBulbNameByUID[index] = "";
+		_lightBulbColorModeKeyByUID[index] = "";
+	}
+
+	IsBridgeDiscovered = off;
+	IsBridgeAvailable = off;
+	IsAuthenticated = off;
+	IsEnabled_out = off;
+}
+
+push IsEnabled_latch
+{
+	Initialize();
+}
+
+release IsEnabled_latch
+{
+	Uninitialize();
+}
+
+push ToggleIsEnabled
+{
+	if (IsEnabled_out = off)
+		Initialize();
+	else
+		Uninitialize();
+}
+        
+///////////////////////////////////////////////////////////////////////////////
+//
+// Discovery
+//
+///////////////////////////////////////////////////////////////////////////////
+  
+/*           
+push DiscoverBridges
+{
+	DiscoveredHueBridge bridge;
+	integer index;
+
+	Print("Discover bridges");
+	_client.DiscoverBridges();
+	Print("Discover bridges done");
+
+	DiscoveredBridgesCount = _client.DiscoveredBridgesCount;
+	for (index=1 to DiscoveredBridgesCount)
+	{
+		if (index <= MaxNumberOfBridges)
+		{
+			_client.GetDiscoveredBridge(index - 1, bridge);
+			DiscoveredBridgeIpAddress[index] = bridge.LanIpAddress;
+			DiscoveredBridgeMacAddress[index] = bridge.MacAddress;
+		}
+	}
+}
+*/
+           
+///////////////////////////////////////////////////////////////////////////////
+//
+// Authentication
+//
+///////////////////////////////////////////////////////////////////////////////
+  
+push Authenticate
+{
+	STRING username[50];
+	if (IsAuthenticated = off)
+	{
+		username = _client.Authenticate(LastIpAddress, "HueForCrestron", "ControlSystem");
+		if (Len(username) > 0)
+		{
+			LastUserName = username;
+			Initialize();
+		}
+	}
+	else
+	{
+		Print("Already authenticated\n");
+	}
+}
+          
+///////////////////////////////////////////////////////////////////////////////
+//
+// Refreshing
+//
+///////////////////////////////////////////////////////////////////////////////
+
+change RefreshInterval_in
+{
+	_client.RefreshInterval = RefreshInterval_in;
+	RefreshInterval_out = _client.RefreshInterval;
+}
+
+push RefreshIntervalIncludesBridge_latch
+{
+	_client.RefreshIntervalPartsValue = _client.RefreshIntervalPartsValue | RefreshIntervalParts_Bridge;
+}
+release RefreshIntervalIncludesBridge_latch
+{
+	_client.RefreshIntervalPartsValue = _client.RefreshIntervalPartsValue & not RefreshIntervalParts_Bridge;
+}
+
+push RefreshIntervalIncludesLights_latch
+{
+	_client.RefreshIntervalPartsValue = _client.RefreshIntervalPartsValue | RefreshIntervalParts_Lights;
+}
+release RefreshIntervalIncludesLights_latch
+{
+	_client.RefreshIntervalPartsValue = _client.RefreshIntervalPartsValue & not RefreshIntervalParts_Lights;
+}
+
+push RefreshIntervalIncludesGroups_latch
+{
+	_client.RefreshIntervalPartsValue = _client.RefreshIntervalPartsValue | RefreshIntervalParts_Groups;
+}
+release RefreshIntervalIncludesGroups_latch
+{
+	_client.RefreshIntervalPartsValue = _client.RefreshIntervalPartsValue & not RefreshIntervalParts_Groups;
+}
+
+push RefreshIntervalIncludesScenes_latch
+{
+	_client.RefreshIntervalPartsValue = _client.RefreshIntervalPartsValue | RefreshIntervalParts_Scenes;
+}
+release RefreshIntervalIncludesScenes_latch
+{
+	_client.RefreshIntervalPartsValue = _client.RefreshIntervalPartsValue & not RefreshIntervalParts_Scenes;
+}
+  
+push Refresh
+{
+	_client.Refresh();
+}
+ 
+push RefreshBridgeInformation
+{
+	_client.RefreshBridgeConfiguration();
+}
+
+push RefreshLightBulb
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.Refresh();
+	}
+}
+
+push RefreshLightBulbByUID
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("RefreshLightBulbByUID: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.Refresh();
+	}
+}
+
+push BridgeBeginCheckForSoftwareUpdates
+{
+	BeginCheckForSoftwareUpdatesResult result;
+	_client.BeginCheckForSoftwareUpdates(result);
+	BridgeBeginCheckForSoftwareUpdatesResult = result;
+	if (result = BeginCheckForSoftwareUpdatesResult.Started)
+		BridgeCheckForSoftwareUpdatesInProgress = on;
+	else if (result = BeginCheckForSoftwareUpdatesResult.UpdateAlreadyAvailable)
+		BridgeCheckForSoftwareUpdatesResult = CheckForSoftwareUpdatesResult.Completed;
+}                                      
+
+push BridgeBeginApplySoftwareUpdates
+{
+	BeginApplySoftwareUpdatesResult result;
+	_client.BeginApplySoftwareUpdates(result);
+	BridgeBeginApplySoftwareUpdatesResult = result;
+	if (result = BeginApplySoftwareUpdatesResult.Started)
+		BridgeApplySoftwareUpdatesInProgress = on;
+}                                      
+                
+push BeginSearchForNewLightBulbs_in
+{
+	BeginSearchForNewLightBulbsResult result;
+	integer index;
+                              
+	FoundLightBulbName = "";
+	for (index = 1 to _foundLightBulbsCount)
+		FoundLightBulbNames[index] = "";
+	_foundLightBulbsCount = 0;
+	FoundLightBulbsCount = 0;
+
+	_client.BeginSearchForNewLightBulbs(result);
+	BeginSearchForNewLightBulbsResult_out = result;
+	if (result = BeginSearchForNewLightBulbsResult.Started)
+		SearchForNewLightBulbsInProgress = on;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//
+// Inputs
+//
+///////////////////////////////////////////////////////////////////////////////
+
+change LightBulbsDefaultTransitionTime_in
+{
+	if (LightBulbsDefaultTransitionTime_in = 0)
+		_client.LightBulbsDefaultTransitionTime = -1;
+	else
+		_client.LightBulbsDefaultTransitionTime = LightBulbsDefaultTransitionTime_in;
+
+	LightBulbsDefaultTransitionTime_out = LightBulbsDefaultTransitionTime_in;
+} 
+
+change LightBulbByUIDMapping
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		ClearByUIDAtMappingIndex(index);
+		return;
+	}
+
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) = 0)
+	{
+		Print("LightBulbByUIDMapping: No light bulb with unique ID %s was found\n", LightBulbByUIDMapping[index]);
+		ClearByUIDAtMappingIndex(index);
+		return;
+	}
+
+	UpdateLightBulbStateFromLightBulbByUID(lightBulb, index, 0);
+}
+
+change LightBulbName_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.Name = LightBulbName_in[index];
+	}
+}
+
+change LightBulbNameByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbNameByUID: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.Name = LightBulbNameByUID_in[index];
+	}
+}
+
+push LightBulbToggle_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.Toggle();
+	}
+}
+
+push LightBulbToggleByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbToggleByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.Toggle();
+	}
+}
+
+push LightBulbOnOff_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.On = 1;
+	}
+}
+
+push LightBulbOnOffByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbOnOffByUID_in(push): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.On = 1;
+	}
+}
+
+release LightBulbOnOff_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.On = 0;
+	}
+}
+
+release LightBulbOnOffByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbOnOffByUID_in(release): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.On = 0;
+	}
+}
+
+push LightBulbOn_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.On = 1;
+	}
+}
+
+push LightBulbOnByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbOnByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.On = 1;
+	}
+}
+
+push LightBulbOff_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.On = 0;
+	}
+}
+
+push LightBulbOffByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbOffByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.On = 0;
+	}
+}
+
+push LightBulbInstantOn_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.InstantOn();
+	}
+}
+
+push LightBulbInstantOnByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbInstantOnByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.InstantOn();
+	}
+}
+
+push LightBulbInstantOff_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.InstantOff();
+	}
+}
+
+push LightBulbInstantOffByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbInstantOffByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.InstantOff();
+	}
+}
+
+change LightBulbBrightness_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		if (UpdatingLightBulb_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.SetBrightness = 1;
+			_lightBulbPendingPropertiesToSet.Brightness = LightBulbBrightness_in[index];
+			return;
+		}
+
+		lightBulb.Brightness = LightBulbBrightness_in[index];
+	}
+}
+
+change LightBulbBrightnessByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbBrightnessByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		if (UpdatingLightBulbByUID_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.SetBrightness = 1;
+			_lightBulbPendingPropertiesToSet.Brightness = LightBulbBrightnessByUID_in[index];
+			return;
+		}
+
+		lightBulb.Brightness = LightBulbBrightnessByUID_in[index];
+	}
+}
+
+change LightBulbBrightnessPct_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		if (UpdatingLightBulb_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.SetBrightnessPercentage = 1;
+			_lightBulbPendingPropertiesToSet.BrightnessPercentage = LightBulbBrightnessPct_in[index];
+			return;
+		}
+
+		lightBulb.BrightnessPercentage = LightBulbBrightnessPct_in[index];
+	}
+}
+
+change LightBulbBrightnessPctByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbBrightnessPctByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		if (UpdatingLightBulbByUID_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.SetBrightnessPercentage = 1;
+			_lightBulbPendingPropertiesToSet.BrightnessPercentage = LightBulbBrightnessPctByUID_in[index];
+			return;
+		}
+
+		lightBulb.BrightnessPercentage = LightBulbBrightnessPctByUID_in[index];
+	}
+}
+
+push LightBulbBrightnessRaise_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.Raise(LightBulbBrightnessRaiseOffset_in[index]);
+	}
+}
+
+push LightBulbBrightnessRaiseByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbBrightnessRaiseByUID: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.Raise(LightBulbBrightnessRaiseOffsetByUID_in[index]);
+	}
+}
+
+push LightBulbBrightnessLower_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.Lower(LightBulbBrightnessLowerOffset_in[index]);
+	}
+}
+
+push LightBulbBrightnessLowerByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbBrightnessLowerByUID: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.Lower(LightBulbBrightnessLowerOffsetByUID_in[index]);
+	}
+}
+
+change LightBulbBrightnessRaiseTime_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.RaiseTime = LightBulbBrightnessRaiseTime_in[index];
+	}
+}
+
+change LightBulbBrightnessRaiseTimeByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbBrightnessRaiseTimeByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.RaiseTime = LightBulbBrightnessRaiseTimeByUID_in[index];
+	}
+}
+
+push LightBulbBrightnessRaise_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.StartRaise();
+	}
+}
+
+push LightBulbBrightnessRaiseByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbBrightnessRaiseByUID_latch(push): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.StartRaise();
+	}
+}
+
+release LightBulbBrightnessRaise_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.StopRaise();
+	}
+}
+
+release LightBulbBrightnessRaiseByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbBrightnessRaiseByUID_latch(release): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.StopRaise();
+	}
+}
+
+
+change LightBulbBrightnessLowerTime_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.LowerTime = LightBulbBrightnessLowerTime_in[index];
+	}
+}
+
+change LightBulbBrightnessLowerTimeByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbBrightnessLowerTimeByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.LowerTime = LightBulbBrightnessLowerTimeByUID_in[index];
+	}
+}
+
+push LightBulbBrightnessLower_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.StartLower();
+	}
+}
+
+push LightBulbBrightnessLowerByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbBrightnessLowerByUID_latch(push): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.StartLower();
+	}
+}
+
+release LightBulbBrightnessLower_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.StopLower();
+	}
+}
+
+release LightBulbBrightnessLowerByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbBrightnessLowerByUID_latch(release): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.StopLower();
+	}
+}
+
+change LightBulbCycleDimTime_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.CycleDimTime = LightBulbCycleDimTime_in[index];
+	}
+}
+
+change LightBulbCycleDimTimeByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbCycleDimTimeByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.CycleDimTime = LightBulbCycleDimTimeByUID_in[index];
+	}
+}
+
+push LightBulbCycleDim_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.StartCycleDim();
+	}
+}
+
+push LightBulbCycleDimByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbCycleDimByUID_latch(push): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.StartCycleDim();
+	}
+}
+
+release LightBulbCycleDim_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.StopCycleDim();
+	}
+}
+
+release LightBulbCycleDimByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbCycleDimByUID_latch(release): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.StopCycleDim();
+	}
+}
+
+change LightBulbCycleColorTempTime_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.CycleColorTemperatureTime = LightBulbCycleColorTempTime_in[index];
+	}
+}
+
+change LightBulbCycleColorTempTimeByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbCycleColorTempTimeByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.CycleColorTemperatureTime = LightBulbCycleColorTempTimeByUID_in[index];
+	}
+}
+
+push LightBulbCycleColorTemp_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.StartCycleColorTemperature();
+	}
+}
+
+push LightBulbCycleColorTempByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbCycleColorTempByUID_latch(push): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.StartCycleColorTemperature();
+	}
+}
+
+release LightBulbCycleColorTemp_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.StopCycleColorTemperature();
+	}
+}
+
+release LightBulbCycleColorTempByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbCycleColorTempByUID_latch(release): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.StopCycleColorTemperature();
+	}
+}
+
+                         
+change LightBulbCycleHueTime_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.CycleHueTime = LightBulbCycleHueTime_in[index];
+	}
+}
+
+change LightBulbCycleHueTimeByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbCycleHueTimeByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.CycleHueTime = LightBulbCycleHueTimeByUID_in[index];
+	}
+}
+
+push LightBulbCycleHue_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.StartCycleHue();
+	}
+}
+
+push LightBulbCycleHueByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbCycleHueByUID_latch(push): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.StartCycleHue();
+	}
+}
+
+release LightBulbCycleHue_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.StopCycleHue();
+	}
+}
+
+release LightBulbCycleHueByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbCycleHueByUID_latch(release): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.StopCycleHue();
+	}
+}
+                        
+change LightBulbCycleSaturationTime_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.CycleSaturationTime = LightBulbCycleSaturationTime_in[index];
+	}
+}
+
+change LightBulbCycleSaturationTimeByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbCycleSaturationTimeByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.CycleSaturationTime = LightBulbCycleSaturationTimeByUID_in[index];
+	}
+}
+
+push LightBulbCycleSaturation_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.StartCycleSaturation();
+	}
+}
+
+push LightBulbCycleSaturationByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbCycleSaturationByUID_latch(push): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.StartCycleSaturation();
+	}
+}
+
+release LightBulbCycleSaturation_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.StopCycleSaturation();
+	}
+}
+
+release LightBulbCycleSaturationByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbCycleSaturationByUID_latch(release): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.StopCycleSaturation();
+	}
+}
+
+
+change LightBulbColorTemp_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		if (UpdatingLightBulb_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.SetColorTemperature = 1;
+			_lightBulbPendingPropertiesToSet.ColorTemperature = LightBulbColorTemp_in[index];
+			return;
+		}
+
+		lightBulb.ColorTemperature = LightBulbColorTemp_in[index];
+	}
+}
+
+change LightBulbColorTempByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbColorTempByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		if (UpdatingLightBulbByUID_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.SetColorTemperature = 1;
+			_lightBulbPendingPropertiesToSet.ColorTemperature = LightBulbColorTempByUID_in[index];
+			return;
+		}
+
+		lightBulb.ColorTemperature = LightBulbColorTempByUID_in[index];
+	}
+}
+
+push LightBulbColorTempWarm
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		if (UpdatingLightBulb_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.SetColorTemperature = 1;
+			_lightBulbPendingPropertiesToSet.ColorTemperature = LightBulbColorTemperature.Warm;
+			return;
+		}
+
+		lightBulb.KnownColorTemperature = LightBulbColorTemperature.Warm;
+	}	
+}
+
+push LightBulbColorTempWarmByUID
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbColorTempWarmByUID: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		if (UpdatingLightBulbByUID_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.SetColorTemperature = 1;
+			_lightBulbPendingPropertiesToSet.ColorTemperature = LightBulbColorTemperature.Warm;
+			return;
+		}
+
+		lightBulb.ColorTemperature = LightBulbColorTemperature.Warm;
+	}
+}
+
+push LightBulbColorTempDaylight
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		if (UpdatingLightBulb_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.SetColorTemperature = 1;
+			_lightBulbPendingPropertiesToSet.ColorTemperature = LightBulbColorTemperature.Daylight;
+			return;
+		}
+
+		lightBulb.KnownColorTemperature = LightBulbColorTemperature.Daylight;
+	}	
+}
+
+push LightBulbColorTempDaylightByUID
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbColorTempDaylightByUID: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		if (UpdatingLightBulbByUID_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.SetColorTemperature = 1;
+			_lightBulbPendingPropertiesToSet.ColorTemperature = LightBulbColorTemperature.Daylight;
+			return;
+		}
+
+		lightBulb.ColorTemperature = LightBulbColorTemperature.Daylight;
+	}
+}
+
+change LightBulbHue_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		if (UpdatingLightBulb_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.SetHue = 1;
+			_lightBulbPendingPropertiesToSet.Hue = LightBulbHue_in[index];
+			return;
+		}
+
+		lightBulb.Hue = LightBulbHue_in[index];
+	}
+}
+
+change LightBulbHueByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbHueByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		if (UpdatingLightBulbByUID_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.SetHue = 1;
+			_lightBulbPendingPropertiesToSet.Hue = LightBulbHueByUID_in[index];
+			return;
+		}
+
+		lightBulb.Hue = LightBulbHueByUID_in[index];
+	}
+}
+
+change LightBulbSaturation_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		if (UpdatingLightBulb_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.SetSaturation = 1;
+			_lightBulbPendingPropertiesToSet.Saturation = LightBulbSaturation_in[index];
+			return;
+		}
+
+		lightBulb.Saturation = LightBulbSaturation_in[index];
+	}
+}
+
+change LightBulbSaturationByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbSaturationByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		if (UpdatingLightBulbByUID_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.SetSaturation = 1;
+			_lightBulbPendingPropertiesToSet.Saturation = LightBulbSaturationByUID_in[index];
+			return;
+		}
+
+		lightBulb.Saturation = LightBulbSaturationByUID_in[index];
+	}
+}
+
+change LightBulbSaturationPct_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		if (UpdatingLightBulb_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.SetSaturationPercentage = 1;
+			_lightBulbPendingPropertiesToSet.SaturationPercentage = LightBulbSaturationPct_in[index];
+			return;
+		}
+
+		lightBulb.SaturationPercentage = LightBulbSaturationPct_in[index];
+	}
+}
+
+change LightBulbSaturationPctByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbSaturationPctByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		if (UpdatingLightBulbByUID_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.SetSaturationPercentage = 1;
+			_lightBulbPendingPropertiesToSet.SaturationPercentage = LightBulbSaturationPctByUID_in[index];
+			return;
+		}
+
+		lightBulb.SaturationPercentage = LightBulbSaturationPctByUID_in[index];
+	}
+}
+
+change LightBulbColorNameOrHexRgb_in
+{
+	LightBulb lightBulb;
+	LightBulbProperties propertiesToSet;
+
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		if (UpdatingLightBulb_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.ColorNameOrHexRgb = LightBulbColorNameOrHexRgb_in[index];
+			return;
+		}
+
+		propertiesToSet.ColorNameOrHexRgb = LightBulbColorNameOrHexRgb_in[index];
+		lightBulb.SetProperties(propertiesToSet);
+	}
+}
+
+change LightBulbColorNameOrHexRgbByUID_in
+{
+	LightBulb lightBulb;
+	LightBulbProperties propertiesToSet;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbColorNameOrHexRgbByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		if (UpdatingLightBulbByUID_latch[index] = on)
+		{
+			_lightBulbPendingPropertiesToSet.ColorNameOrHexRgb = LightBulbColorNameOrHexRgbByUID_in[index];
+			return;
+		}
+
+		propertiesToSet.ColorNameOrHexRgb = LightBulbColorNameOrHexRgbByUID_in[index];
+		lightBulb.SetProperties(propertiesToSet);
+	}
+}
+
+
+change LightBulbTransitionTime_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		if (LightBulbTransitionTime_in[index] > 0)
+		lightBulb.TransitionTime = LightBulbTransitionTime_in[index];
+		else
+			lightBulb.TransitionTime = -1;
+	}
+}
+
+change LightBulbTransitionTimeByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbTransitionTimeByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		if (LightBulbTransitionTimeByUID_in[index] > 0)
+		lightBulb.TransitionTime = LightBulbTransitionTimeByUID_in[index];
+		else
+			lightBulb.TransitionTime = -1;
+	}
+}
+
+push LightBulbColorLoop_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.Effect = LightBulbEffect.ColorLoop;
+	}
+}
+
+push LightBulbColorLoopByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbColorLoop_in(push): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.Effect = LightBulbEffect.ColorLoop;
+	}
+}
+
+release LightBulbColorLoop_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.Effect = LightBulbEffect.None;
+	}
+}
+
+release LightBulbColorLoopByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbColorLoop_in(release): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.Effect = LightBulbEffect.None;
+	}
+}
+
+push LightBulbBlinkOnce_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.Alert = LightBulbAlert.Select;
+	}
+}
+
+push LightBulbBlinkOnceByUID_in
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbBlinkOnceByUID_in: No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.Alert = LightBulbAlert.Select;
+	}
+}
+
+push LightBulbBlinkFor15Sec_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.Alert = LightBulbAlert.LSelect;
+	}
+}
+
+push LightBulbBlinkFor15SecByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbBlinkFor15SecByUID_in(push): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.Alert = LightBulbAlert.LSelect;
+	}
+}
+
+release LightBulbBlinkFor15Sec_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (_client.TryGetLightBulb(index - 1, lightBulb) != 0)
+	{
+		lightBulb.Alert = LightBulbAlert.None;
+	}
+}
+
+release LightBulbBlinkFor15SecByUID_latch
+{
+	LightBulb lightBulb;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+	if (Len(LightBulbByUIDMapping[index]) = 0)
+	{
+		Print("LightBulbBlinkFor15SecByUID_in(release): No light bulb unique ID was assigned at index %d\n", index);
+		return;
+	}
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) != 0)
+	{
+		lightBulb.Alert = LightBulbAlert.None;
+	}
+}
+
+function CompleteUpdatingLightBulb(LightBulb lightBulb)
+{
+	lightBulb.SetProperties(_lightBulbPendingPropertiesToSet);
+	
+	_lightBulbPendingPropertiesToSet.SetBrightness = 0;
+	_lightBulbPendingPropertiesToSet.SetBrightnessPercentage = 0;
+	_lightBulbPendingPropertiesToSet.SetColorTemperature = 0;
+	_lightBulbPendingPropertiesToSet.SetHue = 0;
+	_lightBulbPendingPropertiesToSet.SetSaturation = 0;
+	_lightBulbPendingPropertiesToSet.SaturationPercentage = 0;
+}
+
+release UpdatingLightBulb_latch
+{
+	LightBulb lightBulb;
+	LightBulbProperties propertiesToSet;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+
+	if (_client.TryGetLightBulb(index - 1, lightBulb) = 0)
+		return;
+	
+	CompleteUpdatingLightBulb(lightBulb);
+}
+
+release UpdatingLightBulbByUID_latch
+{
+	LightBulb lightBulb;
+	LightBulbProperties propertiesToSet;
+	integer index;
+	index = GetLastModifiedArrayIndex();
+
+	if (_client.TryGetLightBulbByUniqueId(LightBulbByUIDMapping[index], lightBulb) = 0)
+		return;
+	
+	CompleteUpdatingLightBulb(lightBulb);
+}
+
+function Main()
+{
+	integer index;
+	
+    WaitForInitializationComplete();
+
+	LightBulbsDefaultTransitionTime_out = 0;
+
+	RegisterEvent(_client, ErrorOccurred, OnErrorOccurred);
+	RegisterEvent(_client, CheckForSoftwareUpdatesCompleted, OnCheckForSoftwareUpdatesCompleted);
+	RegisterEvent(_client, ApplySoftwareUpdatesCompleted, OnApplySoftwareUpdatesCompleted);
+	RegisterEvent(_client, BridgeConfigurationPropertiesChanged, OnBridgeConfigurationPropertiesChanged);
+	RegisterEvent(_client, SearchForNewLightBulbsCompleted, OnSearchForNewLightBulbsCompleted);
+	RegisterEvent(_client, FoundLightBulb, OnFoundLightBulb);
+	RegisterEvent(_client, LightBulbPropertiesChanged, OnLightBulbPropertiesChanged);
+
+	//_client.DebugLevel = DebugLevel.Verbose;
+
+	// Initialize outputs to the Client defaults
+	DebugLevelValue_out = _client.DebugLevelValue;
+	RefreshInterval_out = _client.RefreshInterval;
+}

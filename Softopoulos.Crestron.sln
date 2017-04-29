@@ -1,0 +1,26 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 10.00
+# Visual Studio 2008
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Softopoulos.Crestron.PhilipsHue", "PhilipsHue\Softopoulos.Crestron.PhilipsHue.csproj", "{B264FA2D-835B-4128-B0E2-54CCC5B7B759}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Softopoulos.Crestron.Core", "Core\Softopoulos.Crestron.Core.csproj", "{4CA46328-0DD6-4ED9-A84E-3E01FA057274}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B264FA2D-835B-4128-B0E2-54CCC5B7B759}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B264FA2D-835B-4128-B0E2-54CCC5B7B759}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B264FA2D-835B-4128-B0E2-54CCC5B7B759}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B264FA2D-835B-4128-B0E2-54CCC5B7B759}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4CA46328-0DD6-4ED9-A84E-3E01FA057274}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4CA46328-0DD6-4ED9-A84E-3E01FA057274}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4CA46328-0DD6-4ED9-A84E-3E01FA057274}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4CA46328-0DD6-4ED9-A84E-3E01FA057274}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

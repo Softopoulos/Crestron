@@ -1,0 +1,632 @@
+#default_volatile
+#enable_stack_checking
+#enable_trace
+#user_simplsharp_library "Softopoulos.Crestron.PhilipsHue"
+
+// NOTE: All methods from SIMPL# that would normally return a 
+// Boolean will return non-zero for true and zero for false    
+
+#define_constant LightBulbColorMode_NotSupported 0 
+#define_constant LightBulbColorMode_None 1
+#define_constant LightBulbColorMode_HueSaturation 2
+#define_constant LightBulbColorMode_ColorTemperature 3
+#define_constant LightBulbColorMode_XY 4
+
+#define_constant LightBulbColorModeKey_None ""
+#define_constant LightBulbColorModeKey_HueSaturation "hs"
+#define_constant LightBulbColorModeKey_ColorTemperature "ct"
+#define_constant LightBulbColorModeKey_XY "xy"
+            
+// Error message from the last operation that was attempted
+// NOTE: This may contain errors from other operations on the same Hue Bridge.  
+string_output LastError;
+
+///////////////////////////////////////////////////////////////////////////////
+//
+// Initialization
+//
+///////////////////////////////////////////////////////////////////////////////
+
+// Assign the BridgeIpAddress_in to the Hue bridge (on which Initialize was already called in the main Softopoulos.Crestron.PhilipsHue.Bridge.usp module).
+// Then assign LightBulbUniqueId_in to the unique ID (at this time, the MAC address of the light bulb).
+// The unique ID (MAC address) can be retrieved using the official Philips Hue app or via the SIMPL Debugger by looking at the LightBulbUniqueId output for the light bulb you want to address.
+
+string_input BridgeIpAddress_in[50];
+string_output BridgeIpAddress_out;
+
+string_input LightBulbUniqueId_in[28];
+
+///////////////////////////////////////////////////////////////////////////////          
+//
+// Light Bulb Static Info
+//
+analog_output LightBulbIndex;                
+string_output LightBulbId;                               
+string_output LightBulbUniqueId;
+string_output Type;
+analog_output CapabilitiesMask;
+string_output ModelId;
+string_output SwVersion;
+string_output Manufacturer;
+digital_output SupportsDimming;
+digital_output SupportsColorTemp;
+digital_output SupportsColor;
+
+///////////////////////////////////////////////////////////////////////////////
+//
+// Light Bulb Get/Set Values
+//
+
+// Latch this input high to update multiple light bulb properties at once.
+// Then release this input to low to commit the changes.
+// This is useful to avoid seeing the light turn on and then changing brightness/color/temperature.
+// By setting all the properties at once, the light will turn on at the desired brightness/color/temperature.
+digital_input UpdatingLightBulb_latch;
+
+string_input Name_in[32];
+string_output Name_out;
+
+digital_output IsOnline_out;
+
+digital_input Toggle_in;
+digital_input OnOff_latch;
+digital_input On_in;
+digital_input Off_in;
+digital_input InstantOn_in;
+digital_input InstantOff_in;
+digital_output On_out;
+
+analog_output ColorModeValue_out;
+string_output ColorModeKey_out;
+
+analog_input Brightness_in;
+analog_output Brightness_out;
+analog_input BrightnessPct_in;
+analog_output BrightnessPct_out;
+
+analog_input BrightnessRaiseOffset_in;
+digital_input BrightnessRaise_in;
+analog_input BrightnessLowerOffset_in;
+digital_input BrightnessLower_in;
+
+analog_input BrightnessRaiseTime_in;
+analog_output BrightnessRaiseTime_out;
+digital_input BrightnessRaise_latch;
+
+analog_input BrightnessLowerTime_in;
+analog_output BrightnessLowerTime_out;
+digital_input BrightnessLower_latch;
+
+analog_input CycleDimTime_in;
+analog_output CycleDimTime_out;
+digital_input CycleDim_latch;
+
+analog_input CycleColorTempTime_in;
+analog_output CycleColorTempTime_out;
+digital_input CycleColorTemp_latch;
+
+analog_input CycleHueTime_in;
+analog_output CycleHueTime_out;
+digital_input CycleHue_latch;
+
+analog_input CycleSaturationTime_in;
+analog_output CycleSaturationTime_out;
+digital_input CycleSaturation_latch;
+
+analog_input ColorTemp_in;
+analog_output ColorTemp_out;
+digital_input ColorTempWarm;
+digital_input ColorTempDaylight;
+
+analog_input Hue_in;
+analog_output Hue_out;
+
+analog_input Saturation_in;
+analog_output Saturation_out;
+analog_input SaturationPct_in;
+analog_output SaturationPct_out;
+
+string_input ColorNameOrHexRgb_in[50];
+
+// Time of the transition from the light's current state to the new state (in 100ms multiples) 
+// (e.g. 10 = 1 second)
+// If this is 0, the input LightBulbsDefaultTransitionTime_in is used or, if that is not set either, 
+// the Philips Hue default is used, which is 400ms or 0.4 seconds.
+analog_input TransitionTime_in;
+analog_output TransitionTime_out;
+
+digital_input ColorLoop_latch;
+digital_output ColorLoop_out;
+
+digital_input BlinkOnce_in;
+digital_input BlinkFor15Sec_latch;
+
+digital_input Refresh;
+
+digital_input TemporaryChange_latch;
+  
+// Hue client
+BridgeClient _client;
+LightBulb _lightBulb;
+
+// Stateful variable
+LightBulbProperties _lightBulbPendingPropertiesToSet;
+
+string _lightBulbName[32];
+string _lightBulbColorModeKey[5];
+string _lightBulbNameByUID[32];
+string _lightBulbColorModeKeyByUID[5];
+
+    
+///////////////////////////////////////////////////////////////////////////////
+//
+// Functions to update Inputs/Outputs from the Client
+//
+///////////////////////////////////////////////////////////////////////////////
+             
+function UpdateLightBulbStateFromClient(integer isInitalizing)
+{
+	integer colorMode;
+	
+	Print("Update light bulb \"%s\" @ index %d\n", _lightBulb.Name, _lightBulb.Index);
+	if (isInitalizing = 1)
+	{
+		LightBulbIndex = _lightBulb.Index;
+		LightBulbId = _lightBulb.Id;                               
+		LightBulbUniqueId = _lightBulb.UniqueId;
+		Type = _lightBulb.Type;
+		CapabilitiesMask = _lightBulb.Capabilities;
+		ModelId = _lightBulb.ModelId;
+		SwVersion = _lightBulb.SwVersion;
+		Manufacturer = _lightBulb.Manufacturer;
+
+		SupportsDimming = _lightBulb.SupportsDimming;
+		SupportsColorTemp = _lightBulb.SupportsColorTemperature;
+		SupportsColor = _lightBulb.SupportsColor;
+	}
+                                              
+	if (_lightBulbName != _lightBulb.Name)
+	{
+		_lightBulbName = _lightBulb.Name;
+		Name_out = _lightBulb.Name;
+	}
+
+	if (IsOnline_out != _lightBulb.IsOnline)
+		IsOnline_out = _lightBulb.IsOnline;
+	if (On_out != _lightBulb.On)
+		On_out = _lightBulb.On;
+
+	colorMode = _lightBulb.ColorMode;
+	if (ColorModeValue_out != colorMode)
+		ColorModeValue_out = colorMode;
+
+	if (_lightBulbColorModeKey != _lightBulb.ColorModeKey)
+	{
+		_lightBulbColorModeKey = _lightBulb.ColorModeKey;
+		ColorModeKey_out = _lightBulb.ColorModeKey;
+	}
+
+	if (Brightness_out != _lightBulb.Brightness)
+		Brightness_out = _lightBulb.Brightness;
+
+	if (BrightnessPct_out != _lightBulb.BrightnessPercentage)
+		BrightnessPct_out = _lightBulb.BrightnessPercentage;
+
+	if (BrightnessRaiseTime_out != _lightBulb.RaiseTime)
+		BrightnessRaiseTime_out = _lightBulb.RaiseTime;    
+
+	if (BrightnessLowerTime_out != _lightBulb.LowerTime)
+		BrightnessLowerTime_out = _lightBulb.LowerTime;    
+
+	if (CycleDimTime_out != _lightBulb.CycleDimTime)
+		CycleDimTime_out = _lightBulb.CycleDimTime;    
+
+	if (CycleColorTempTime_out != _lightBulb.CycleColorTemperatureTime)
+		CycleColorTempTime_out = _lightBulb.CycleColorTemperatureTime;    
+
+	if (CycleHueTime_out != _lightBulb.CycleHueTime)
+		CycleHueTime_out = _lightBulb.CycleHueTime;    
+
+	if (CycleSaturationTime_out != _lightBulb.CycleSaturationTime)
+		CycleSaturationTime_out = _lightBulb.CycleSaturationTime;    
+
+	if (ColorTemp_out != _lightBulb.ColorTemperature)                                       
+		ColorTemp_out = _lightBulb.ColorTemperature;
+
+	if (Hue_out != _lightBulb.Hue)
+		Hue_out = _lightBulb.Hue;
+
+	if (Saturation_out != _lightBulb.Saturation)
+		Saturation_out = _lightBulb.Saturation;
+
+	if (SaturationPct_out != _lightBulb.SaturationPercentage)
+		SaturationPct_out = _lightBulb.SaturationPercentage;
+
+	if (_lightBulb.TransitionTime = -1)
+	{
+		if (TransitionTime_out != 0)
+			TransitionTime_out = 0;
+	}
+	else
+	{
+		if (TransitionTime_out != _lightBulb.TransitionTime)
+			TransitionTime_out = _lightBulb.TransitionTime;
+	}
+
+	if (_lightBulb.Effect = LightBulbEffect.ColorLoop)
+	{
+		if (ColorLoop_out != on)
+			ColorLoop_out = on;
+	}
+	else
+	{
+		if (ColorLoop_out != off)
+			ColorLoop_out = off;
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//
+// Event Handlers
+//
+///////////////////////////////////////////////////////////////////////////////
+             
+eventHandler OnErrorOccurred(BridgeClient client, ErrorOccurredEventArgs e)
+{
+	LastError = e.ErrorMessage;
+}
+ 
+eventHandler OnLightBulbPropertiesChanged(BridgeClient client, LightBulbPropertiesChangedEventArgs e)
+{
+	if (e.UniqueId = _lightBulb.UniqueId)
+	{
+		Print("Update light bulb \"%s\" from client\n", _lightBulb.Name);
+		UpdateLightBulbStateFromClient(0);
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//
+// Initialization
+//
+///////////////////////////////////////////////////////////////////////////////
+
+change BridgeIpAddress_in
+{
+	if (BridgeClient.TryGetExistingClient(BridgeIpAddress_in, _client) = 1)
+	{
+		BridgeIpAddress_out = BridgeIpAddress_in;
+		
+		RegisterEvent(_client, ErrorOccurred, OnErrorOccurred);
+		RegisterEvent(_client, LightBulbPropertiesChanged, OnLightBulbPropertiesChanged);		
+	}
+	else
+	{
+		LastError = "The IsEnabled_in input must be set high on the main Softopoulos.Crestron.PhilipsHue.Bridge module before setting BridgeIpAddress_in on this module.";
+	}	
+}      
+
+change LightBulbUniqueId_in
+{
+	LightBulb lightBulb;
+	
+	if (Len(BridgeIpAddress_in) > 0)
+	{
+		if (_client.TryGetLightBulbByUniqueId(LightBulbUniqueId_in, lightBulb) = 0)
+			return;
+	
+		_lightBulb = lightBulb;
+		UpdateLightBulbStateFromClient(1);
+	}
+	else
+	{
+		LastError = "The BridgeIpAddress_in input must be set setting this LightBulbIndex_in input.";
+	}
+}
+      
+push Refresh
+{
+	_lightBulb.Refresh();	
+}
+
+change Name_in
+{
+	_lightBulb.Name = Name_in;
+}
+
+push Toggle_in
+{
+	_lightBulb.Toggle();	
+}
+
+push OnOff_latch
+{
+	_lightBulb.On = 1;
+}
+
+release OnOff_latch
+{
+	_lightBulb.On = 0;	
+}
+
+push On_in
+{
+	_lightBulb.On = 1;
+}
+
+push Off_in
+{
+	_lightBulb.On = 0;
+}
+
+push InstantOn_in
+{
+	_lightBulb.InstantOn();
+}
+
+push InstantOff_in
+{
+	_lightBulb.InstantOff();
+}
+
+change Brightness_in
+{
+	if (UpdatingLightBulb_latch = on)
+	{
+		_lightBulbPendingPropertiesToSet.SetBrightness = 1;
+		_lightBulbPendingPropertiesToSet.Brightness = Brightness_in;
+		return;
+	}
+
+	_lightBulb.Brightness = Brightness_in;
+}
+
+change BrightnessPct_in
+{
+	if (UpdatingLightBulb_latch = on)
+	{
+		_lightBulbPendingPropertiesToSet.SetBrightnessPercentage = 1;
+		_lightBulbPendingPropertiesToSet.BrightnessPercentage = BrightnessPct_in;
+		return;
+	}
+
+	_lightBulb.BrightnessPercentage = BrightnessPct_in;
+}
+
+push BrightnessRaise_in
+{
+	_lightBulb.Raise(BrightnessRaiseOffset_in);	
+}
+
+push BrightnessLower_in
+{
+	_lightBulb.Lower(BrightnessLowerOffset_in);	
+}
+
+change BrightnessRaiseTime_in
+{
+	_lightBulb.RaiseTime = BrightnessRaiseTime_in;	
+}
+
+push BrightnessRaise_latch
+{
+	_lightBulb.StartRaise();	
+}
+
+release BrightnessRaise_latch
+{
+	_lightBulb.StopRaise();	
+}
+
+change BrightnessLowerTime_in
+{
+	_lightBulb.LowerTime = BrightnessLowerTime_in;	
+}
+
+push BrightnessLower_latch
+{
+	_lightBulb.StartLower();	
+}
+
+release BrightnessLower_latch
+{
+	_lightBulb.StopLower();	
+}
+
+change CycleDimTime_in
+{
+	_lightBulb.CycleDimTime = CycleDimTime_in;	
+}
+
+push CycleDim_latch
+{
+	_lightBulb.StartCycleDim();	
+}
+
+release CycleDim_latch
+{
+	_lightBulb.StopCycleDim();	
+}
+
+change CycleColorTempTime_in
+{
+	_lightBulb.CycleColorTemperatureTime = CycleColorTempTime_in;	
+}
+
+push CycleColorTemp_latch
+{
+	_lightBulb.StartCycleColorTemperature();	
+}
+
+release CycleColorTemp_latch
+{
+	_lightBulb.StopCycleColorTemperature();	
+}
+                         
+change CycleHueTime_in
+{
+	_lightBulb.CycleHueTime = CycleHueTime_in;	
+}
+
+push CycleHue_latch
+{
+	_lightBulb.StartCycleHue();	
+}
+
+release CycleHue_latch
+{
+	_lightBulb.StopCycleHue();	
+}
+
+change CycleSaturationTime_in
+{
+	_lightBulb.CycleSaturationTime = CycleSaturationTime_in;	
+}
+
+push CycleSaturation_latch
+{
+	_lightBulb.StartCycleSaturation();	
+}
+
+release CycleSaturation_latch
+{
+	_lightBulb.StopCycleSaturation();	
+}
+
+change ColorTemp_in
+{
+	if (UpdatingLightBulb_latch = on)
+	{
+		_lightBulbPendingPropertiesToSet.SetColorTemperature = 1;
+		_lightBulbPendingPropertiesToSet.ColorTemperature = ColorTemp_in;
+		return;
+	}
+
+	_lightBulb.ColorTemperature = ColorTemp_in;
+}
+
+push ColorTempWarm
+{
+	_lightBulb.KnownColorTemperature = LightBulbColorTemperature.Warm;
+}
+
+push ColorTempDaylight
+{
+	_lightBulb.KnownColorTemperature = LightBulbColorTemperature.Daylight;
+}
+
+change Hue_in
+{
+	if (UpdatingLightBulb_latch = on)
+	{
+		_lightBulbPendingPropertiesToSet.SetHue = 1;
+		_lightBulbPendingPropertiesToSet.Hue = Hue_in;
+		return;
+	}
+
+	_lightBulb.Hue = Hue_in;
+}
+
+change Saturation_in
+{
+	if (UpdatingLightBulb_latch = on)
+	{
+		_lightBulbPendingPropertiesToSet.SetSaturation = 1;
+		_lightBulbPendingPropertiesToSet.Saturation = Saturation_in;
+		return;
+	}
+
+	_lightBulb.Saturation = Saturation_in;
+}
+
+change SaturationPct_in
+{
+	if (UpdatingLightBulb_latch = on)
+	{
+		_lightBulbPendingPropertiesToSet.SetSaturationPercentage = 1;
+		_lightBulbPendingPropertiesToSet.SaturationPercentage = SaturationPct_in;
+		return;
+	}
+
+	_lightBulb.SaturationPercentage = SaturationPct_in;
+}
+
+change ColorNameOrHexRgb_in
+{
+	LightBulb lightBulb;
+	LightBulbProperties propertiesToSet;
+
+	if (UpdatingLightBulb_latch = on)
+	{
+		_lightBulbPendingPropertiesToSet.ColorNameOrHexRgb = ColorNameOrHexRgb_in;
+		return;
+	}
+
+	propertiesToSet.ColorNameOrHexRgb = ColorNameOrHexRgb_in;
+	_lightBulb.SetProperties(propertiesToSet);
+}
+
+change TransitionTime_in
+{
+	if (TransitionTime_in > 0)
+		_lightBulb.TransitionTime = TransitionTime_in;
+	else
+		_lightBulb.TransitionTime = -1;
+}
+
+push ColorLoop_latch
+{
+	_lightBulb.Effect = LightBulbEffect.ColorLoop;
+}
+
+release ColorLoop_latch
+{
+	_lightBulb.Effect = LightBulbEffect.None;	
+}
+
+push BlinkOnce_in
+{
+	_lightBulb.Alert = LightBulbAlert.Select;	
+}
+
+push BlinkFor15Sec_latch
+{
+	_lightBulb.Alert = LightBulbAlert.LSelect;	
+}
+
+release BlinkFor15Sec_latch
+{
+	_lightBulb.Alert = LightBulbAlert.None;	
+}
+
+function CompleteUpdatingLightBulb()
+{
+	_lightBulb.SetProperties(_lightBulbPendingPropertiesToSet);
+	
+	_lightBulbPendingPropertiesToSet.SetBrightness = 0;
+	_lightBulbPendingPropertiesToSet.SetBrightnessPercentage = 0;
+	_lightBulbPendingPropertiesToSet.SetColorTemperature = 0;
+	_lightBulbPendingPropertiesToSet.SetHue = 0;
+	_lightBulbPendingPropertiesToSet.SetSaturation = 0;
+	_lightBulbPendingPropertiesToSet.SaturationPercentage = 0;
+}
+
+release UpdatingLightBulb_latch
+{	
+	CompleteUpdatingLightBulb();
+}
+
+push TemporaryChange_latch
+{
+	_lightBulb.BeginTemporaryChange();
+}
+
+release TemporaryChange_latch
+{
+	_lightBulb.EndTemporaryChange();
+}
+
+function Main()
+{	
+    WaitForInitializationComplete();
+}
