@@ -2,8 +2,8 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Crestron.SimplSharp;
 
+using Crestron.SimplSharp;
 namespace Softopoulos.Crestron.Core.Threading
 {
 	public class LockScope : IDisposable
@@ -13,15 +13,7 @@ namespace Softopoulos.Crestron.Core.Threading
 		public LockScope(CCriticalSection criticalSection)
 		{
 			_criticalSection = criticalSection;
-			try
-			{
-				_criticalSection.Enter();
-			}
-			catch
-			{
-				_criticalSection.Leave();
-				throw;
-			}
+			_criticalSection.Enter();
 		}
 
 		private bool _disposed;

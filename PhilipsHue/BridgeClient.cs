@@ -1,21 +1,23 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.ComponentModel;
 using System.Drawing;
 using System.Globalization;
 using System.Linq;
 using System.Text;
-using Crestron.SimplSharp;
-using Crestron.SimplSharp.CrestronSockets;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using System.Diagnostics;
+using System.Net.Sockets;
+using Crestron.SimplSharp;
+using Crestron.SimplSharp.CrestronSockets;
+using Bool = System.Int16;
 using Softopoulos.Crestron.Core;
 using Softopoulos.Crestron.Core.ComponentModel;
 using Softopoulos.Crestron.Core.Diagnostics;
 using Softopoulos.Crestron.Core.Net;
 using Softopoulos.Crestron.Core.Threading;
-using Bool = System.Int16;
+using System.ComponentModel;
 
 namespace Softopoulos.Crestron.PhilipsHue
 {
@@ -207,6 +209,8 @@ namespace Softopoulos.Crestron.PhilipsHue
 
 		#region Fields
 
+		//private string _lastError;
+		//private bool _isLastErrorUserError;
 		private DebugLevel _debugLevel = DebugLevel.None;
 
 		private bool _isBridgeAvailable;
@@ -394,6 +398,7 @@ namespace Softopoulos.Crestron.PhilipsHue
 
 			if (parameters != null && parameters.Length > 0)
 				message = string.Format(message, parameters);
+
 			int index = 0;
 			while (index < message.Length)
 			{
@@ -566,6 +571,7 @@ namespace Softopoulos.Crestron.PhilipsHue
 			string nupnpResponse = null;
 			Log(DebugLevel.Normal, "Retrieve bridge information from Hue website");
 			nupnpResponse = Http.Get(nupnpUrl);
+
 
 			// Parse the UPNP response
 			if (!string.IsNullOrEmpty(upnpResponse))
@@ -946,7 +952,6 @@ namespace Softopoulos.Crestron.PhilipsHue
 						}
 
 						_refreshTimer.Reset(_refreshInterval * 1000, _refreshInterval * 1000);
-
 					}
 					else
 					{
@@ -1491,7 +1496,7 @@ namespace Softopoulos.Crestron.PhilipsHue
 
 			// Get the latest list of light bulbs
 			List<LightBulb> lightBulbsWithChanges =
-				RefreshHueObjects(LightBulb.Api, ref _lightBulbs, ref _lightBulbsById);
+			RefreshHueObjects(LightBulb.Api, ref _lightBulbs, ref _lightBulbsById);
 
 			// Refresh our unique ID dictionary and (re)initialize our light bulb objects 
 			// (some might have been still existing and already initialized, but we just initialize all of them again anyway)
@@ -2022,6 +2027,7 @@ namespace Softopoulos.Crestron.PhilipsHue
 			return result;
 		}
 
+
 		public Bool DeleteLightBulb(int index)
 		{
 			return Execute(() =>
@@ -2194,7 +2200,6 @@ namespace Softopoulos.Crestron.PhilipsHue
 			bool addTransitionTime,
 			LightBulbColorMode? newColorMode)
 		{
-#if SIMPL_SHARP
 			bool anyPropertiesUpdated = false;
 			PropertyChangedEventHandler propertyChangedHandler = (sender, e) =>
 			{
@@ -2218,10 +2223,6 @@ namespace Softopoulos.Crestron.PhilipsHue
 			{
 				lightBulb.PropertyChanged -= propertyChangedHandler;
 			}
-#else
-			bool allSuccess = SendStateUpdate(lightBulb, bodyParams, addTransitionTime, newColorMode);
-			return allSuccess;
-#endif
 		}
 
 		private bool SendStateUpdate(

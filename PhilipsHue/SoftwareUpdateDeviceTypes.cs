@@ -6,6 +6,7 @@ using Bool = System.Int16;
 using Softopoulos.Crestron.Core;
 using Softopoulos.Crestron.Core.Diagnostics;
 
+
 namespace Softopoulos.Crestron.PhilipsHue
 {
 	/// <summary>
